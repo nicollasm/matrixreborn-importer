@@ -15,21 +15,17 @@ CHUNKSIZE = 50000  # Número de linhas a serem lidas por vez
 DELIMITER = ';'  # Delimitador dos campos no arquivo CSV
 DB_ENGINE = 'postgresql+psycopg2'  # Engine do SQLAlchemy para o PostgreSQL
 
+
 class Database:
     """Classe que representa a conexão com o banco de dados."""
 
     def __init__(self, dbname, user, password, host):
-        self.dbname = dbname
-        self.user = user
-        self.password = password
-        self.host = host
-        self.engine = None
+        self.engine = create_engine(f'{DB_ENGINE}://{user}:{password}@{host}/{dbname}')
 
     def test_connection(self):
         """
         Testa a conexão com o banco de dados. Emite um log e levanta uma exceção em caso de falha.
         """
-        self.engine = create_engine(f'{DB_ENGINE}://{self.user}:{self.password}@{self.host}/{self.dbname}')
         try:
             self.engine.connect()
             logging.info("Conexão bem-sucedida.")
@@ -45,6 +41,39 @@ class Database:
             logging.error("O nome da tabela não é válido.")
             raise ValueError("O nome da tabela não é válido.")
 
+        with self.engine.begin() as connection:
+            if self.engine.dialect.has_table(connection, table_name):
+                table = Table(table_name, MetaData(), autoload_with=self.engine)
+                table.drop(self.engine)
+                logging.info(f"Tabela {table_name} apagada.")
+            else:
+                logging.info(f"A tabela {table_name} não existe.")
+
+
+class Importer:
+    """Classe que representa o importador de dados."""
+
+    def __init__(self, db, file_path):
+        self.db = db
+        self.file_path = file_path
+
+    def import_data(self, table_name):
+        """
+        Importa dados de um arquivo CSV para o banco de dados. Emite um log e levanta uma exceção em caso de falha.
+        """
+        if not table_name:
+            logging.error("O nome da tabela não é válido.")
+            raise ValueError("O nome da tabela não é válido.")
+
+        total_rows = 0
+        try:
+            for chunk in pd.read_csv(self.file_path, chunksize=CHUNKSIZE, delimiter=DELIMITER, dtype={13: 'str'}):
+                chunk.to_sql(table_name, self.db.engine, if_exists='append', index=False)
+                total_rows += len(chunk)
+            logging.info(f"Dados importados com sucesso. Total de linhas: {total_rows}.")
+        except Exception as e:
+            logging.error(f"Ocorreu um erro inesperado durante a importação: {e}")
+            raise
         try:
             with self.engine.begin() as connection:
                 metadata = MetaData()
@@ -56,6 +85,7 @@ class Database:
         except Exception as e:
             logging.error(f"Ocorreu um erro inesperado durante a exclusão da tabela: {e}")
             raise
+
 
 class Importer:
     """Classe que representa o importador de dados."""
@@ -82,6 +112,7 @@ class Importer:
         except Exception as e:
             logging.error(f"Ocorreu um erro inesperado durante a importação: {e}")
             raise
+
 
 class App:
     """Classe que representa a interface do usuário."""
